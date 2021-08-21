@@ -849,7 +849,7 @@ Resources:
   WebSecurityGroup3:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Security Group for the Internal Axtria Cloud communication, for AD, Zscaler Connector, Sentinel log aggregator instance communication
+      GroupDescription: Security Group for the Internal Axtria Cloud communication, for AD, Zscaler Connector, Sentinel log aggregator instances communication
       GroupName: SG-AXTRIA-ADMIN-IT-3
       VpcId: !Ref VPC
       Tags:
