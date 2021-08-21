@@ -1,0 +1,963 @@
+Description:  'This template deploys a VPC, with a pair of public and private subnets spread across two Availability Zones. It deploys an internet gateway, with a default route on the public subnets. It deploys a NAT gateways (one in each AZ), and default routes for them in the private subnets. It also deploys 4 Security Groups, 3 security groups need to be connected to each server of the VPC, 1 security group is intended for the Endpoints. This template also creates multiple vpc endpoints such as logs, monitoring, ssmmessages, ec2messages, ssm, s3 Gateway'
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.11.156.0/24
+
+  PublicSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 10.11.156.0/26
+
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 10.11.156.64/26
+
+  PrivateSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.11.156.128/26
+
+  PrivateSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.11.156.192/26
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ2)
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ1)
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
+
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Routes
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Routes (AZ1)
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Routes (AZ2)
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+
+  CloudwatchLogEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+         - Effect: Allow
+           Principal: '*'
+           Action:
+            - '*'
+           Resource:
+            - '*'
+      PrivateDnsEnabled: true
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      VpcEndpointType: Interface
+      SubnetIds:
+       - !Ref PrivateSubnet1
+       - !Ref PrivateSubnet2
+      SecurityGroupIds: 
+       - !Ref WebSecurityGroup4
+      VpcId: !Ref VPC
+
+  CloudwatchMonitoringEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+         - Effect: Allow
+           Principal: '*'
+           Action:
+            - '*'
+           Resource:
+            - '*'
+      PrivateDnsEnabled: true
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.monitoring'
+      VpcEndpointType: Interface
+      SubnetIds:
+       - !Ref PrivateSubnet1
+       - !Ref PrivateSubnet2      
+      SecurityGroupIds: 
+       - !Ref WebSecurityGroup4
+      VpcId: !Ref VPC
+      
+  SSMEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+         - Effect: Allow
+           Principal: '*'
+           Action:
+            - '*'
+           Resource:
+            - '*'
+      PrivateDnsEnabled: true
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      VpcEndpointType: Interface
+      SubnetIds:
+       - !Ref PrivateSubnet1
+       - !Ref PrivateSubnet2      
+      SecurityGroupIds: 
+       - !Ref WebSecurityGroup4
+      VpcId: !Ref VPC
+               
+  S3Endpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+         - Effect: Allow
+           Principal: '*'
+           Action:
+            - '*'
+           Resource:
+            - '*'
+      RouteTableIds:
+       - !Ref PrivateRouteTable1
+       - !Ref PrivateRouteTable2
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      VpcId: !Ref VPC
+
+  FlowLogs:
+    Type: 'AWS::EC2::FlowLog'
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref VPC
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Sub ${EnvironmentName}FlowLogs
+      DeliverLogsPermissionArn:
+        'Fn::GetAtt':
+          - IamRoleForFlowLogs
+          - Arn
+  FlowLogsGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub ${EnvironmentName}FlowLogs
+      RetentionInDays: 90
+  IamRoleForFlowLogs:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub ${EnvironmentName}iamRoleFlowLogsToCloudWatchLogs
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: allow-access-to-cw-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:DescribeLogGroups'
+                  - 'logs:DescribeLogStreams'
+                Resource: '*'
+
+  WebSecurityGroup1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for Communication from Axtria Offices, Zscaler_US, Deep_Security_AV
+      GroupName: SG-AXTRIA-ADMIN-IT-1
+      VpcId: !Ref VPC
+      Tags:
+       - Key: Name
+         Value: !Sub ${EnvironmentName}-SG-AXTRIA-ADMIN-IT-1
+      SecurityGroupIngress:
+      - IpProtocol: -1
+        CidrIp: 172.16.0.0/24
+        Description: "India LAN B11 Mgmt"
+      - IpProtocol: -1
+        CidrIp: 172.16.2.0/23
+        Description: "India LAN B11 Data"
+      - IpProtocol: -1
+        CidrIp: 172.16.8.0/24
+        Description: "India LAN D12 Mgmt"
+      - IpProtocol: -1
+        CidrIp: 172.16.10.0/23
+        Description: "India LAN D12 Data"
+      - IpProtocol: -1
+        CidrIp: 172.16.16.0/24
+        Description: "India LAN B17 Mgmt"
+      - IpProtocol: -1
+        CidrIp: 172.16.18.0/23
+        Description: "India LAN B17 Data"
+      - IpProtocol: -1
+        CidrIp: 172.16.22.0/23
+        Description: "India LAN B17 WiFi"
+      - IpProtocol: -1
+        CidrIp: 182.156.229.98/32
+        Description: "Gurgaon Tower B11 (TATA Primary)"
+      - IpProtocol: -1
+        CidrIp: 182.75.14.62/32
+        Description: "Gurgaon Tower B11 (Airtel Secondary)"
+      - IpProtocol: -1
+        CidrIp: 111.93.195.66/32
+        Description: "Gurgaon B17 (TATA Primary)"
+      - IpProtocol: -1
+        CidrIp: 182.76.45.226/32
+        Description: "Gurgaon B17 (Airtel Secondary)"
+      - IpProtocol: -1
+        CidrIp: 111.93.47.138/32
+        Description: "Gurgaon D12 (TATA Primary)"
+      - IpProtocol: -1
+      - IpProtocol: -1
+        CidrIp: 182.75.11.130/32
+        Description: "Gurgaon D12 (Airtel Secondary)"
+      - IpProtocol: -1
+        CidrIp: 182.156.234.134/32
+        Description: "Noida Floor 13 ( TATA Primary)"
+      - IpProtocol: -1
+        CidrIp: 182.75.125.130/32
+        Description: "Noida Floor 13 (Airtel Secondary)"
+      - IpProtocol: -1
+        CidrIp: 63.247.162.122/32
+        Description: "USA ISP"
+      - IpProtocol: -1
+        CidrIp: 10.20.28.0/23
+        Description: "US LAN"
+      - IpProtocol: -1
+        CidrIp: 172.16.12.0/24
+        Description: "India LAN D12 WiFi"
+      - IpProtocol: -1
+        CidrIp: 172.16.14.0/23
+        Description: "India LAN D12 WiFi"
+      - IpProtocol: -1
+        CidrIp: 172.16.26.0/23
+        Description: "Noida-Private-IP-Range-1"
+      - IpProtocol: -1
+        CidrIp: 172.16.30.0/23
+        Description: "Noida-Private-IP-Range-2"
+      - IpProtocol: -1
+        CidrIp: 172.16.24.0/24
+        Description: "Noida-Private-IP-Range-3"
+      - IpProtocol: -1
+        CidrIp: 52.36.9.75/32
+        Description: "Event-PRTG"
+      - IpProtocol: -1
+        CidrIp: 44.239.144.126/32
+        Description: "VAPT Linux Machine-Security Team"
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 104.129.204.0/23
+        Description: "Zscaler PAC File"
+      - IpProtocol: -1
+        CidrIp: 104.129.196.0/23
+        Description: "Zscaler PAC File"
+      - IpProtocol: -1
+        CidrIp: 165.225.56.0/22
+        Description: "Zscaler PAC File"
+      - IpProtocol: -1
+        CidrIp: 165.225.34.0/23
+        Description: "Zscaler PAC File"
+      - IpProtocol: -1
+        CidrIp: 165.225.216.0/23
+        Description: "Zscaler PAC File"
+      - IpProtocol: -1
+        CidrIp: 104.129.200.0/24
+        Description: "Zscaler PAC File"
+      - IpProtocol: -1
+        CidrIp: 165.225.10.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 104.129.198.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.32.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.222.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.212.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.38.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.218.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 104.129.192.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.242.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 64.215.22.0/24
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.214.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 147.161.128.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.50.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.36.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.208.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.210.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 104.129.194.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 165.225.8.0/23
+        Description: "Zscaler US"
+      - IpProtocol: -1
+        CidrIp: 34.208.227.82/32
+        Description: "SFTP-Axtria"
+      - IpProtocol: -1
+        CidrIp: 52.36.9.75/32
+        Description: "Event-PRTG"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.198.27.224/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.205.210.199/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.205.239.162/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 50.17.162.194/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.0.124.201/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.0.33.128/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.72.111.249/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.72.211.36/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.87.46.150/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.207.138.122/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 54.80.120.113/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 54.175.211.84/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.194.74.60/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.196.197.189/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 4118
+        ToPort: 4118
+        CidrIp: 0.0.0.0/0
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 4119
+        ToPort: 4119
+        CidrIp: 0.0.0.0/0
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 4120
+        ToPort: 4120
+        CidrIp: 0.0.0.0/0
+        Description: "AV Deep Security"
+  WebSecurityGroup2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for AV Deep_Security_AV, & LogMeIn
+      GroupName: SG-AXTRIA-ADMIN-IT-2
+      VpcId: !Ref VPC
+      Tags:
+       - Key: Name
+         Value: !Sub ${EnvironmentName}-SG-AXTRIA-ADMIN-IT-2
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 4118
+        ToPort: 4118
+        CidrIp: 34.205.5.0/27
+        Description: "AV Deep Security"
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 63.251.34.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 63.251.46.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 64.74.17.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 64.74.18.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 64.74.103.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 64.94.18.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 64.94.46.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 64.95.128.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 66.150.108.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 67.217.80.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 69.25.20.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 69.25.247.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 77.242.192.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 95.172.70.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 111.221.57.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 212.118.234.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 216.219.114.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 63.251.34.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 63.251.46.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 64.74.17.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 64.74.18.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 64.74.103.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 64.94.18.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 64.94.46.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 64.95.128.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 66.150.108.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 67.217.80.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 69.25.20.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 69.25.247.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 77.242.192.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 95.172.70.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 111.221.57.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 212.118.234.0/24
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 216.219.114.0/23
+        Description: "LogMeIn"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.204.219.38/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.205.83.195/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.2.63.133/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.21.149.243/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.44.144.238/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.55.188.35/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.201.199.128/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.206.54.30/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 54.86.152.157/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 54.87.173.241/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.192.67.219/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.196.25.105/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.199.44.254/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.204.244.61/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.206.23.113/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.206.95.140/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.206.146.6/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 34.206.215.233/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.23.102.52/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.54.141.100/32
+        Description: "AV Deep Security"
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 52.54.240.176/32
+        Description: "AV Deep Security"
+  WebSecurityGroup3:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for the Internal Axtria Cloud communication, for AD, Zscaler Connector, Sentinel log aggregator instance communication
+      GroupName: SG-AXTRIA-ADMIN-IT-3
+      VpcId: !Ref VPC
+      Tags:
+       - Key: Name
+         Value: !Sub ${EnvironmentName}-SG-AXTRIA-ADMIN-IT-3
+      SecurityGroupIngress:
+      - IpProtocol: -1
+        CidrIp: 10.10.12.190/32
+        Description: "Zscaler Connector - East"
+      - IpProtocol: -1
+        CidrIp: 10.10.230.107/32
+        Description: "VAPT Security Server"
+      - IpProtocol: -1
+        CidrIp: 172.31.8.163/32
+        Description: "Zscaler Connector 1 - West"
+      - IpProtocol: -1
+        CidrIp: 172.31.15.212/32
+        Description: "Zscaler Connector 2 - West"
+      - IpProtocol: -1
+        CidrIp: 10.10.12.113/32
+        Description: "East Sentinel Log Collector - Windows"
+      - IpProtocol: -1
+        CidrIp: 10.10.12.114/32
+        Description: "East Sentinel Log Collector - Linux"        
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 10.10.12.113/32
+        Description: "East Sentinel Log Collector - Windows"
+      - IpProtocol: -1
+        CidrIp: 10.10.12.114/32
+        Description: "East Sentinel Log Collector - Linux"
+      - IpProtocol: -1
+        CidrIp: 172.31.40.180/32
+        Description: "West Sentinel Log Collector - Windows"
+      - IpProtocol: -1
+        CidrIp: 172.31.33.100/32
+        Description: "West Sentinel Log Collector - Linux"        
+      - IpProtocol: -1
+        CidrIp: 10.10.12.221/32
+        Description: "NVS-AD"
+      - IpProtocol: -1
+        CidrIp: 172.31.29.181/32
+        Description: "Common-AD"
+      
+  WebSecurityGroup4:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for the VPC Endpoints
+      GroupName: SG-VPC-Endpoint
+      VpcId: !Ref VPC
+      Tags:
+       - Key: Name
+         Value: !Sub ${EnvironmentName}-SG-VPC-Endpoint
+
+  WebSecurityGroup4Ingress:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !Ref WebSecurityGroup4
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !GetAtt WebSecurityGroup3.GroupId
+      Description: "SG-AXTRIA-ADMIN-IT-3"
+      
+  WebSecurityGroup3Egress:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      GroupId: !Ref WebSecurityGroup3
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !GetAtt WebSecurityGroup4.GroupId
+      Description: "SG-VPC-Endpoint"
+
+Outputs:
+  VPC:
+    Description: A reference to the created VPC
+    Value: !Ref VPC
+
+  PublicSubnets:
+    Description: A list of the public subnets
+    Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2 ]]
+
+  PrivateSubnets:
+    Description: A list of the private subnets
+    Value: !Join [ ",", [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ]]
+
+  PublicSubnet1:
+    Description: A reference to the public subnet in the 1st Availability Zone
+    Value: !Ref PublicSubnet1
+
+  PublicSubnet2:
+    Description: A reference to the public subnet in the 2nd Availability Zone
+    Value: !Ref PublicSubnet2
+
+  PrivateSubnet1:
+    Description: A reference to the private subnet in the 1st Availability Zone
+    Value: !Ref PrivateSubnet1
+
+  PrivateSubnet2:
+    Description: A reference to the private subnet in the 2nd Availability Zone
+    Value: !Ref PrivateSubnet2
+
+  CloudwatchLogEndpoint:
+    Description: A reference to the CloudwatchLogEndpoint
+    Value: !Ref CloudwatchLogEndpoint
+    
+  CloudwatchMonitoringEndpoint:
+    Description: A reference to the CloudwatchLogEndpoint
+    Value: !Ref CloudwatchMonitoringEndpoint    
+
