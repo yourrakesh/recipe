@@ -9,3 +9,5 @@ Beans
 Pizza
 
 Added last line
+
+Added new line from local repo
