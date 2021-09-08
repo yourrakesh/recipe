@@ -11,22 +11,22 @@ Parameters:
     Default: 10.11.156.0/24
 
   PublicSubnet1CIDR:
-    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability-Zone
     Type: String
     Default: 10.11.156.0/26
 
   PublicSubnet2CIDR:
-    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability-Zone
     Type: String
     Default: 10.11.156.64/26
 
   PrivateSubnet1CIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability-Zone
     Type: String
     Default: 10.11.156.128/26
 
   PrivateSubnet2CIDR:
-    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability-Zone
     Type: String
     Default: 10.11.156.192/26
 
